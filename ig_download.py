@@ -47,15 +47,17 @@ class InstagramUser:
             for i, image_obj in enumerate(images):
                 img = image_obj.get("node")
                 downloads.append([img["display_url"], img["id"]])
-        image_caption = (
+        image_caption: str = (
             node.get("edge_media_to_caption", {}).get("edges", [{}])[0].get("node")
         ).get("text")
-        image_caption = self.tagtize_caption(image_caption)
+        image_caption_tagged = self.tagtize_caption(image_caption)
         for download in downloads:
             image_bytes = httpx.get(download[0]).content
             with open(self.download_folder / f"{download[1]}.jpg", "wb") as handler:
                 handler.write(image_bytes)
             with open(self.download_folder / f"{download[1]}.txt", "wb") as out:
+                out.write(image_caption_tagged.encode("utf-8"))
+            with open(self.download_folder / f"{download[1]}_raw.txt", "wb") as out:
                 out.write(image_caption.encode("utf-8"))
             self.image_count += 1
 
@@ -122,14 +124,15 @@ class InstagramUser:
             self.download_image(image)
         self.page += 1
         print(
-            f"Downloaded images from page: {self.pages}\nDownloaded images: {self.image_count}"
+            f"Downloaded images from page: {self.page}\nDownloaded images: {self.image_count}"
         )
         while self.has_next_page:
             images = self.follow_pagination()
             for image in images:
                 self.download_image(image)
+                self.page += 1
                 print(
-                    f"Downloaded images from page: {self.pages}\nDownloaded images: {self.image_count}"
+                    f"Downloaded images from page: {self.page}\nDownloaded images: {self.image_count}"
                 )
 
     def setup_folder(self):
@@ -157,8 +160,12 @@ class InstagramUser:
         self.page = 0  # only for debug output
         self.image_count = 0  # only for debug output
         self.url = sys.argv[1]
-        print(self.url)
+        if not self.url.endswith("/"):
+            raise ValueError(
+                "Url has to end with '/' otherwise instagram will deny the request"
+            )
         self.username = self.extract_user_from_url()
+        print(f"Starting download of images from user: {self.username}")
         self.client = httpx.Client()
         self.set_login_cookies()
         self.setup_folder()
@@ -167,13 +174,4 @@ class InstagramUser:
 
 if __name__ == "__main__":
     user = InstagramUser()
-    # try:
     user.download()
-    # except AttributeError:
-    #     print(
-    #         """Error caught. After the first few pages this usually gets an error.
-    #              Probably some fixing on the headers is still necessary"""
-    #     )
-    #     sys.exit()
-
-# TODO instagram sends set-cookie multiple times, but requests only receives one of them. FIX
