@@ -55,11 +55,12 @@ class InstagramUser:
         for download in download_queue:
             try:
                 image_bytes = httpx.get(download[0]).content
-            except httpx.ReadTimeout:
+            except (httpx.ReadTimeout, httpx.ConnectError):
                 print("Timeoutet on image download. Retrying in 5 seconds...")
                 time.sleep(5)
                 image_bytes = httpx.get(download[0]).content
             if image_bytes:
+                print(".", end=" ")
                 self.write_files(image_caption, download, image_bytes)
             else:
                 print("Image could not be downloaded. Skipping")
@@ -133,20 +134,23 @@ class InstagramUser:
         base_selector = Selector(base_data.text)
         self.add_csrf_headers(base_selector)
         first_images = self.setup_user_context()
+        self.page += 1
+        print(f"Downloading images on page {self.page}", end=" ")
         for image in first_images:
             self.download_image(image)
-        self.page += 1
+            print(".", end=" ")
+        print("DONE")
         print(
             f"Downloaded images from page: {self.page}\nDownloaded images: {self.image_count}"
         )
         while self.has_next_page:
             images = self.follow_pagination()
             self.page += 1
+            print(f"Downloading images on page {self.page}", end=" ")
             for image in images:
                 self.download_image(image)
-                print(
-                    f"Downloaded images from page: {self.page}\nDownloaded images: {self.image_count}"
-                )
+            print("DONE")
+            print(f"Downloaded images: {self.image_count}")
 
     def setup_folder(self):
         if len(sys.argv) > 2:
