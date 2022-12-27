@@ -1,10 +1,12 @@
-from pathlib import Path
-import httpx
-import sys
-from parsel import Selector
-import re
-import urllib.parse
 import json
+import re
+import sys
+import time
+import urllib.parse
+from pathlib import Path
+
+import httpx
+from parsel import Selector
 
 
 class InstagramUser:
@@ -34,7 +36,7 @@ class InstagramUser:
         return ", ".join(tags)
 
     def download_image(self, image: dict):
-        downloads = list()
+        download_queue = list()
         node = image.get("node")
         if node.get("is_video"):
             return
@@ -42,24 +44,35 @@ class InstagramUser:
         images = node.get("edge_sidecar_to_children", {}).get("edges", {})
         image_id = node.get("id")
         if not images:
-            downloads.append([image_url, image_id])
+            download_queue.append([image_url, image_id])
         else:
             for i, image_obj in enumerate(images):
                 img = image_obj.get("node")
-                downloads.append([img["display_url"], img["id"]])
+                download_queue.append([img["display_url"], img["id"]])
         image_caption: str = (
             node.get("edge_media_to_caption", {}).get("edges", [{}])[0].get("node")
         ).get("text")
+        for download in download_queue:
+            try:
+                image_bytes = httpx.get(download[0]).content
+            except httpx.ReadTimeout:
+                print("Timeoutet on image download. Retrying in 5 seconds...")
+                time.sleep(5)
+                image_bytes = httpx.get(download[0]).content
+            if image_bytes:
+                self.write_files(image_caption, download, image_bytes)
+            else:
+                print("Image could not be downloaded. Skipping")
+
+    def write_files(self, image_caption: str, download, image_bytes):
         image_caption_tagged = self.tagtize_caption(image_caption)
-        for download in downloads:
-            image_bytes = httpx.get(download[0]).content
-            with open(self.download_folder / f"{download[1]}.jpg", "wb") as handler:
-                handler.write(image_bytes)
-            with open(self.download_folder / f"{download[1]}.txt", "wb") as out:
-                out.write(image_caption_tagged.encode("utf-8"))
-            with open(self.download_folder / f"{download[1]}_raw.txt", "wb") as out:
-                out.write(image_caption.encode("utf-8"))
-            self.image_count += 1
+        with open(self.download_folder / f"{download[1]}.jpg", "wb") as handler:
+            handler.write(image_bytes)
+        with open(self.download_folder / f"{download[1]}.txt", "wb") as out:
+            out.write(image_caption_tagged.encode("utf-8"))
+        with open(self.download_folder / f"{download[1]}_raw.txt", "wb") as out:
+            out.write(image_caption.encode("utf-8"))
+        self.image_count += 1
 
     def extract_csrf_data(self, response: httpx.Response, csrf_token: str):
         rows = response.text.splitlines()
@@ -166,7 +179,7 @@ class InstagramUser:
             )
         self.username = self.extract_user_from_url()
         print(f"Starting download of images from user: {self.username}")
-        self.client = httpx.Client()
+        self.client = httpx.Client(timeout=None)
         self.set_login_cookies()
         self.setup_folder()
         self.headers["Referer"] = f"https://www.instagram.com/{self.username}/?hl=en"
