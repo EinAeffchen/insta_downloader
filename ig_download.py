@@ -23,7 +23,15 @@ class InstagramUser:
     profile_post_actions = ""
     user_id = ""
     last_cursor = ""
-    pagination_url = "https://www.instagram.com/graphql/query/?query_hash={profile}&variables={encoded_data}"
+    pagination_url = "https://www.instagram.com/graphql/query/?query_hash=69cba40317214236af40e7efa697781d&variables={encoded_data}"
+
+    def tagtize_caption(self, description: str) -> str:
+        words = description.split()
+        tags = list()
+        for word in words:
+            if word.startswith("#"):
+                tags.append(word[1:])
+        return ", ".join(tags)
 
     def download_image(self, image: dict):
         downloads = list()
@@ -42,12 +50,14 @@ class InstagramUser:
         image_caption = (
             node.get("edge_media_to_caption", {}).get("edges", [{}])[0].get("node")
         ).get("text")
+        image_caption = self.tagtize_caption(image_caption)
         for download in downloads:
             image_bytes = httpx.get(download[0]).content
             with open(self.download_folder / f"{download[1]}.jpg", "wb") as handler:
                 handler.write(image_bytes)
             with open(self.download_folder / f"{download[1]}.txt", "wb") as out:
                 out.write(image_caption.encode("utf-8"))
+            self.image_count += 1
 
     def extract_csrf_data(self, response: httpx.Response, csrf_token: str):
         rows = response.text.splitlines()
@@ -67,7 +77,8 @@ class InstagramUser:
             print("[!] This profile doesn't seem to have any images. Exiting")
             sys.exit()
         images = media.get("edges")
-        self.user_id = user.get("id")
+        if not self.user_id:
+            self.user_id = user.get("id")
         self.has_next_page = media.get("page_info", {}).get("has_next_page")
         self.last_cursor = media.get("page_info", {}).get("end_cursor")
         return images
@@ -81,21 +92,10 @@ class InstagramUser:
     def extract_user_from_url(self):
         return self.url.split("/")[3]
 
-    def set_profile_post_action(self, action_url: str):
-        response = httpx.get(action_url)
-        rows = response.text.splitlines()
-        for row in rows:
-            if '__d("PolarisProfilePostsActions"' in row:
-                self.profile_post_actions = re.match('.*;f="(\w+)"', row).group(1)
-
     def add_csrf_headers(self, base_selector):
         csrf_data_url = base_selector.xpath(
-            "//link[contains(@href, 'rsrc.php/v3') and contains(@href, 'en_US') and contains(@href, 'RHgDfKYaJaQ')]/@href"
+            "//link[contains(@href, 'rsrc.php/v3') and contains(@href, 'RHgDfKYaJaQ')]/@href"
         ).get()
-        profile_post_action_url = base_selector.xpath(
-            "//link[contains(@href, 'rsrc.php/v3') and contains(@href, 'Xt29m4ovoQZ18pBT8IaHRdnZCgHIjNRB7GJ3Pw6fK8Bdf5iyKo7NI_x1um8GBlaW4')]/@href"
-        ).get()
-        self.set_profile_post_action(profile_post_action_url)
         csrf_response = httpx.get(csrf_data_url)
         lazy_load = base_selector.xpath(
             "//script[contains(text(), 'csrf_token')]"
@@ -108,26 +108,29 @@ class InstagramUser:
         pagination_data = urllib.parse.quote(
             json.dumps({"id": self.user_id, "first": 12, "after": self.last_cursor})
         )
-        next_page = self.pagination_url.format(
-            profile=self.profile_post_actions, encoded_data=pagination_data
-        )
+        next_page = self.pagination_url.format(encoded_data=pagination_data)
         user_data = self.client.get(next_page, headers=self.headers)
-        # print(dict(self.client.cookies))
         user_data_json = user_data.json()
         return self.extract_image_urls(user_data_json)
 
     def download(self):
         base_data = self.client.get(self.url, headers=self.headers)
-        # print(dict(self.client.cookies))
         base_selector = Selector(base_data.text)
         self.add_csrf_headers(base_selector)
         first_images = self.setup_user_context()
         for image in first_images:
             self.download_image(image)
+        self.page += 1
+        print(
+            f"Downloaded images from page: {self.pages}\nDownloaded images: {self.image_count}"
+        )
         while self.has_next_page:
             images = self.follow_pagination()
             for image in images:
                 self.download_image(image)
+                print(
+                    f"Downloaded images from page: {self.pages}\nDownloaded images: {self.image_count}"
+                )
 
     def setup_folder(self):
         if len(sys.argv) > 2:
@@ -151,7 +154,10 @@ class InstagramUser:
         self.client.cookies.update(cookie_data)
 
     def __init__(self) -> None:
+        self.page = 0  # only for debug output
+        self.image_count = 0  # only for debug output
         self.url = sys.argv[1]
+        print(self.url)
         self.username = self.extract_user_from_url()
         self.client = httpx.Client()
         self.set_login_cookies()
@@ -161,13 +167,13 @@ class InstagramUser:
 
 if __name__ == "__main__":
     user = InstagramUser()
-    try:
-        user.download()
-    except AttributeError:
-        print(
-            """Error caught. After the first few pages this usually gets an error.
-                 Probably some fixing on the headers is still necessary"""
-        )
-        sys.exit()
+    # try:
+    user.download()
+    # except AttributeError:
+    #     print(
+    #         """Error caught. After the first few pages this usually gets an error.
+    #              Probably some fixing on the headers is still necessary"""
+    #     )
+    #     sys.exit()
 
 # TODO instagram sends set-cookie multiple times, but requests only receives one of them. FIX
