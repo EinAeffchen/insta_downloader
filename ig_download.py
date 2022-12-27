@@ -128,9 +128,9 @@ class InstagramUser:
         )
         while self.has_next_page:
             images = self.follow_pagination()
+            self.page += 1
             for image in images:
                 self.download_image(image)
-                self.page += 1
                 print(
                     f"Downloaded images from page: {self.page}\nDownloaded images: {self.image_count}"
                 )
