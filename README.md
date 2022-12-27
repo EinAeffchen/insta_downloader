@@ -1,5 +1,5 @@
 # Instagram Downloader
-Script to bulk download images from instagram accoutns
+Script to bulk download images from instagram accounts
 
 # Getting Started
 1. Login to instagram.
